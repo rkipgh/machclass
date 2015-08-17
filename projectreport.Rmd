@@ -1,0 +1,185 @@
+---
+title: "projectreport"
+output: 
+  html_document:
+    keep_md: true
+---
+
+*August 2015*
+
+*This document reports on my project analysis for the Coursera--Johns Hopkins "Machine Learning" class.*
+
+
+## Introduction
+
+Project data are from here:  <http://groupware.les.inf.puc-rio.br/har>
+
+Participants in the study were asked to perform weight-lifting exercises either correctly or incorrectly for a total of 5 movement patterns/activities (reported in the "classe" variable in the data set).  The goal of this project is to predict the participants' activities based on data from motion sensors that they were wearing.
+
+
+## Data exploration and preprocessing
+
+```{r, echo=FALSE, results="hide", message=FALSE, warning=FALSE}
+data1 = read.csv("pml-training.csv", header = T, na.strings = c("NA", "", "#DIV/0!"))
+irrvars = c(1, 2, 3:7)  
+data2 = data1 [ , -irrvars]  
+```
+
+Besides the outcome variable (the '`r colnames(data1)[dim(data1)[2]]`' variable), there are `r dim(data1)[2]-1` other variables in the data set.  The first few variables (e.g., timestamps, row numbers) were not relevant to predicting the outcome variable based on motion sensor data, so they were removed (the arguable exception is the participants' names, which might allow detection of motion patterns that vary among the participants).
+
+The remaining variables divided into two categories:  those with no missing data and those that were composed almost entirely of missing data, as shown in the histogram:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+hist(colMeans(is.na(data2)), col = "gray")
+```
+
+Thus, all variables that were composed of more than 95% missing data were discarded.
+
+```{r, echo=FALSE, results="hide", message=FALSE, warning=FALSE}
+missvars = which(colMeans(is.na(data2)) > 0.95) 
+data2 = data2[ , -missvars]
+```
+
+To further reduce the number of variables, the functions 'nearZeroVar' and 'findLinearCombos' from the 'caret' package were used to identify variables with little variance or that composed linear combinations, but neither of these methods identified variables for further elimination.  That left `r dim(data2)[2]-1` potential predictors.  
+
+```{r, echo=FALSE, results="hide", message=FALSE, warning=FALSE}
+library(caret)
+corcols1 = findCorrelation(cor(data2[,1:52]), verbose = F, cutoff = 0.85)
+data5 = data2[-5373, ]
+corcols2 = findCorrelation(cor(data5[,1:52]), verbose = F, cutoff = 0.85)
+```
+
+Four groups of variables were found that showed high correlations (>0.85) within each group.  All of these variables except for one in each group could be eliminated with probably little effect on prediction error.  This process would eliminate `r length(corcols1)` variables.  However, the correlations in one of the groups were driven by a single outlier.  Elimination of this outlier would mean that only `r length(corcols2)` variables could be eliminated.  Subsequent analyses were performed with and without these variables and with and without the outlier, but the effects on the final analysis were negligible.  For brevity, these analysis variations will not be discussed further.
+
+```{r, echo=FALSE, results="hide", message=FALSE, warning=FALSE}
+data8 = data2
+outcomecol = which(colnames(data8) == "classe")
+pcapp = preProcess(data8[ , -outcomecol], method = "pca", thresh = 0.80)
+pcas = predict(pcapp, data8[ , -outcomecol])
+data8 = cbind(pcas, data8[ , outcomecol])
+colnames(data8)[dim(data8)[2]] = "classe"
+```
+
+Principal components analysis was used to further simplify the data.  To retain at least 80% of the variance, `r dim(pcas)[2]` principal components were generated and used in subsequent analysis.
+
+
+## Machine learning model training
+
+```{r, echo=FALSE, results="hide", message=FALSE, warning=FALSE}
+datadum = data2
+set.seed(8644)
+samplesize = 1500
+rows = sample(1:dim(datadum)[1], samplesize)
+minitrain = datadum[rows, ]
+```
+
+The original plan was to run several machine learning algorithms on 60% of the cases as a training set with cross-validation with K-folds.  However, running the algorithms (with the 'train' function from the 'caret' package) on the large data set kept producing memory allocation errors, even when only very small portions of the data set were used for training (e.g., 50 - 200 cases).  Therefore, I manually set up a random sample of the data and settled on `r samplesize` cases, which was small enough to avoid memory errors and for the algorithms to run in a reasonable amount of time.  
+
+```{r, echo=TRUE, results="hide", message=FALSE, warning=FALSE}
+ctrl = trainControl(method = "cv", p = 0.60, number = 10)
+```
+
+```{r, echo=FALSE, results="hide", message=FALSE, warning=FALSE}
+rfmodel2 = train(classe ~ ., method = "rf", trControl = ctrl, prox = T, data = minitrain)
+gbmmodel2 = train(classe ~ ., method = "gbm", trControl = ctrl, verbose = F, data = minitrain)
+nbmodel2 = train(classe ~ ., method = "nb", trControl = ctrl, data = minitrain)
+ldamodel2 = train(classe ~ ., method = "lda", trControl = ctrl, data = datadum)
+rpartmodel2 = train(classe ~ ., method = "rpart", trControl = ctrl, data = datadum)
+
+minitest = datadum[-rows, ]
+predrf2 = predict(rfmodel2, minitest)
+predgbm2 = predict(gbmmodel2, minitest)
+prednb2 = predict(nbmodel2, minitest)
+
+confrf2 = confusionMatrix(predrf2, minitest$classe)
+confgbm2 = confusionMatrix(predgbm2, minitest$classe)
+```
+
+```{r, echo=FALSE, results="hide", message=FALSE, warning=FALSE}
+datadum = data8
+set.seed(8644)
+samplesize = 1500
+rows = sample(1:dim(datadum)[1], samplesize)
+minitrain = datadum[rows, ]
+ctrl = trainControl(method = "cv", p = 0.60, number = 10)
+rfmodel8 = train(classe ~ ., method = "rf", trControl = ctrl, prox = T, data = minitrain)
+gbmmodel8 = train(classe ~ ., method = "gbm", trControl = ctrl, verbose = F, data = minitrain)
+nbmodel8 = train(classe ~ ., method = "nb", trControl = ctrl, data = minitrain)
+ldamodel8 = train(classe ~ ., method = "lda", trControl = ctrl, data = datadum)
+rpartmodel8 = train(classe ~ ., method = "rpart", trControl = ctrl, data = datadum)
+
+minitest = datadum[-rows, ]
+predrf8 = predict(rfmodel8, minitest)
+predgbm8 = predict(gbmmodel8, minitest)
+prednb8 = predict(nbmodel8, minitest)
+
+confrf8 = confusionMatrix(predrf8, minitest$classe)
+confgbm8 = confusionMatrix(predgbm8, minitest$classe)
+```
+
+I ran random forests, generalized boosted regression, naive Bayes, linear discriminant analysis, and classification tree ('rpart') models with cross-validation (settings shown above). This set of models was run for both the principal components (PCA) variables and for the non-PCA-transformed variables as separate data sets.  The in-sample accuracy measurements are below:
+
+`r max(rfmodel2$results$Accuracy)` - non-PCA, Random forests
+
+`r max(gbmmodel2$results$Accuracy)` - non-PCA, Generalized boosted regression
+
+`r max(nbmodel2$results$Accuracy)` - non-PCA, Naive Bayes
+
+`r max(ldamodel2$results$Accuracy)` - non-PCA, Linear discriminant analysis
+
+`r max(rpartmodel2$results$Accuracy)` - non-PCA, Classification tree
+
+
+`r max(rfmodel8$results$Accuracy)` - PCA, Random forests
+
+`r max(gbmmodel8$results$Accuracy)` - PCA, Generalized boosted regression
+
+`r max(nbmodel8$results$Accuracy)` - PCA, Naive Bayes
+
+`r max(ldamodel8$results$Accuracy)` - PCA, Linear discriminant analysis
+
+`r max(rpartmodel8$results$Accuracy)` - PCA, Classification tree
+
+For both the PCA and non-PCA data sets, random forests and generalized boosted regression produced the highest accuracy in-sample.  Notably, the accuracies for all the models in the PCA data set were substantially lower than in the non-PCA data set.  Simplifying the data with PCA clearly diminished the prediction accuracies of the models.  But perhaps much of the difference is due to overfitting to the non-PCA data; perhaps the PCA data eliminated a lot of noise so that the models will generalize well out-of-sample.
+
+
+## Machine learning model testing
+
+The out-of-sample accuracies for the two best in-sample models (random forests and generalized boosted regression) were calculated on the `r dim(minitest)[[1]]` cases that were not part of the `r samplesize` cases used for training.  The out-of-sample accuracies are below:
+
+`r confrf2$overall[[1]]` - non-PCA, Random forests
+
+`r confgbm2$overall[[1]]` - non-PCA, Generalized boosted regression
+
+`r confrf8$overall[[1]]` - PCA, Random forests
+
+`r confgbm8$overall[[1]]` - PCA, Generalized boosted regression
+
+The models still performed substantially better on the non-PCA data than on the PCA data.
+
+```{r, echo=FALSE, results="hide", message=FALSE, warning=FALSE}
+datadum = data2
+minitest = datadum[-rows, ]
+
+combminitest = data.frame(predrf2, predgbm2, prednb2, minitest$classe)
+colnames(combminitest)[dim(combminitest)[2]] = "classe"
+combminitest$vote = combminitest[ , 1]
+for (i in 1:dim(combminitest)[1]) {
+     if (combminitest[i, 2] == combminitest[i, 3]) combminitest$vote[i] = combminitest[i, 2]
+}
+
+confcomb2 = confusionMatrix(combminitest$vote, minitest$classe)
+```
+
+Finally, a combined, or ensembled, model was created by taking the majority vote of the random forests, generalized boosted regression, and naive Bayes models.  This ensembled model was tested on the non-PCA data with `r dim(minitest)[[1]]` cases.  Its accuracy is below:
+
+`r confcomb2$overall[[1]]` - non-PCA, Ensembled model
+
+This model performed about the same as the corresponding random forests and generalized boosted regression models on the same data.  I had intended to validate the ensembled model on the assignment-provided testing data (from the file "pml-testing.csv"), but I did not realize that the data are composed of only 20 cases.  Thus, it remains to be seen whether the ensembled model might perform better than the random forests or generalized boosted regression models in a new set of data.
+
+## Conclusions
+
+1. Random forests and generalized boosted regression models produced the highest accuracies on this data set
+2. Simplifying the data with PCA substantially reduced the prediction accuracies compared with the non-PCA data.  This report did not examine whether using PCA provided a benefit by substantially reducing computational time for the models.
+3. Removing variables that were highly correlated with other variables in the data set did not substantially change the prediction accuracies obtained by the models (results not shown).  Such variable elimination might provide a benefit by reducing computational time, but this was not examined.
+4. Removing one outlier that accounted for several high correlations among variables did not substantially change the prediction accuracies obtained by the models (results not shown).  However, outliers were not subject to an exhaustive search effort, so this might be a useful avenue for improving the models, especially the ones that make stronger assumptions about the data distributions.
